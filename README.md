@@ -70,13 +70,14 @@ pipx install copier
      <!-- markdownlint-disable MD013 -->
    ```sh
    cd <git project dir>
-   copier copy --vcs-ref "release" git+https://pmiorg.visualstudio.com/Data%20and%20Analytics/_git/dana-dtsc-common . --UNSAFE
+   copier copy --vcs-ref "release" repo_url . --UNSAFE
+   copier copy --vcs-ref master https://github.com/foo/copier-template.git ./path/to/destination
    ```
 
    > To specify specific template version to use, provide a specific semver tag for `--vcs-ref <semver>` command flag:
    >
    > ```sh
-   > copier copy --vcs-ref "1.0.0" git+https://pmiorg.visualstudio.com/Data%20and%20Analytics/_git/dana-dtsc-common . --UNSAFE
+   > copier copy --vcs-ref "1.0.0" repo_url . --UNSAFE
    > ```
    <!-- markdownlint-enable -->
 
@@ -86,7 +87,7 @@ pipx install copier
 
    ```txt
    🎤 Project name (repository name)
-      pmi-dtsc-testproject
+      dtsc-testproject
    🎤 Project description
       This is a test - this is only a test.
    🎤 Project: Python version to use [default: 3.10]
@@ -112,7 +113,7 @@ pipx install copier
 
    - you update the `CHANGELOG.md`
    - additional packages are required in `environment*.yaml` or `requirements.txt`
-   - your project requires packages in PMI's Azure PIP repository; these are specified in `pmi-dtsc-requirements.txt`
+   - your project requires packages in Azure PIP repository; these are specified in `dtsc-requirements.txt`
    - additional typo corrections are required in `.typos.toml`
    - alterations are needed in `.gitignore` or `.dockerignore`
    - multiple docker image builds are needed in `.ci/azure-pipeline-publish.yaml`
@@ -186,7 +187,7 @@ which are useful for running standard tasks (lint, test, build, publish, etc.).
    parameters:
    - name: PACKAGE_NAME
      # descr: |
-     #   package name used to publish; we prefix with 'pmi-dtsc-'
+     #   package name used to publish; we prefix with 'dtsc-'
      #   "None" or "" (blank) will skip Validate and Build steps
      type: string
      default: {{ managed with `copier` }}
@@ -281,6 +282,7 @@ deprecation window](https://scientific-python.org/specs/spec-0000/#support-windo
 |   ├ _azure-pipeline-publish_ - "main" runner yaml for `common` repo (managed by `copier` template!)
 |   ├ ci-release-docker.yaml - configuration for running docker CI
 |   ├ ci-release-python.yaml - configuration for running python CI
+|   └ ci-release-tag.yaml - configuration to validate and create tag in  CI
 |   └ ci-release-tag.yaml - configuration to validate and create tag in  CI
 ├ **docker/** - resources to test `common/.ci` docker templates
 ├ **docs/** - test package docs to test `common/.ci` python templates
