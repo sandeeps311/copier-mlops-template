@@ -1,4 +1,4 @@
-# dana-dtsc-common
+# copier-mlops-template
 
 Provides configuration files and CI templates for use across repositories:
 
@@ -9,7 +9,7 @@ Common CI (`./.ci`) provides CI templates for Azure Pipelines, and should be ref
 
 ## Table of Contents
 
-- [dana-dtsc-common](#dana-dtsc-common)
+- [copier-mlops-template](#copier-mlops-template)
   - [Table of Contents](#table-of-contents)
   - [Use `common` with `copier`](#use-common-with-copier)
     - [Install `copier`](#install-copier)
