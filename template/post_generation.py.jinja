@@ -107,7 +107,7 @@ def clean_up_python():
         rm("pyproject.toml")
         rm("requirements.txt")
 
-    _use_private_packages: = {{ use_private_packages: }}
+    _use_private_packages  = {{ use_private_packages }}
     if not _use_private_packages::
         rm("extra-requirements.txt")
 
