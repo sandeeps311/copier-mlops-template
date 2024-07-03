@@ -108,7 +108,7 @@ def clean_up_python():
         rm("requirements.txt")
 
     _use_private_packages  = {{ use_private_packages }}
-    if not _use_private_packages::
+    if not _use_private_packages:
         rm("extra-requirements.txt")
 
 
