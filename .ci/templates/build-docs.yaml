@@ -1,0 +1,138 @@
+---
+# Build documentation and  then push to Azure fileshare and rebuild site index
+
+parameters:
+  - name: PACKAGE_NAME
+    type: string
+    default: ""
+  - name: IMPORT_NAME
+    type: string
+    default: ""
+  - name: VERSION_PATH
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  - bash: echo "##vso[task.prependpath]$CONDA/bin"
+    displayName: "Add conda to PATH"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+
+  - bash: |
+      NEWVERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      echo "NEWVERSION: ${NEWVERSION}"
+      echo "##vso[task.setvariable variable=NEWVERSION;isOutput=true]${NEWVERSION}"
+    name: get_new_version
+    displayName: "Get (new) version"
+    env:
+      VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - bash: |
+      python -m pip install --upgrade pip
+      python -m pip install numpydoc sphinx sphinx-rtd-theme
+      if [[ -d ./docs ]]; then
+        mkdir -p "/dist/docs"
+        sphinx-apidoc -e -f -a -o ./docs  ./src/${{ parameters.IMPORT_NAME }}
+        sphinx-build -a -E -b html ./docs ./dist/docs
+        sphinx-build -b linkcheck ./docs ./dist/docs
+      else
+        echo "No docs folder found; exiting"
+      fi
+    displayName: "Build docs"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      # PIP_EXTRA_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+      AZURE_PIPELINE: true
+
+  - task: AzureCLI@2
+    displayName: "Push docs to Azure fileshare (int)"
+    inputs:
+      azureSubscription: $(RG_CONN_NAME)
+      addSpnToEnvironment: true
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az storage file upload-batch \
+          --account-name 'aksdsshare' \
+          --destination 'documentation' \
+          --destination-path '/${{ parameters.PACKAGE_NAME }}/$(get_new_version.NEWVERSION)' \
+          --source '$(Pipeline.Workspace)/$(Build.Repository.Name)/dist/docs/'
+
+  ############################################################################
+  # - task:
+  #   displayName: Rebuild documentation site indexes
+  - task: AzureCLI@2
+    displayName: "Download documentation fileshare"
+    inputs:
+      azureSubscription: $(RG_CONN_NAME)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        mkdir -p "${DOCSDIR}"
+
+        az storage file download-batch \
+          --account-name 'aksdsshare' \
+          --destination "${DOCSDIR}" \
+          --source 'https://aksdsshare.file.core.windows.net/documentation/'
+    env:
+      DOCSDIR: $(Pipeline.Workspace)/$(Build.Repository.Name)/temp_docs
+
+  - bash: |
+      chmod +x $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/build-docs-index.sh
+    displayName: Grant shell script permission
+
+  - bash: $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/build-docs-index.sh
+    displayName: "Build fileshare indexes"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)/temp_docs"
+    env:
+      AZURE_PIPELINE: true
+      # PIP_EXTRA_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+
+  # - task: AzureCLI@2
+  #   displayName: "Push documentation back to fileshare"
+  #   inputs:
+  #     azureSubscription: $(RG_CONN_NAME)
+  #     scriptType: bash
+  #     scriptLocation: inlineScript
+  #     inlineScript: |
+  #       az storage file upload-batch \
+  #         --account-name 'aksdsshare' \
+  #         --destination 'https://aksdsshare.file.core.windows.net/documentation/' \
+  #         --source '$(Pipeline.Workspace)/$(Build.Repository.Name)/temp_docs'
+
+  - task: AzureCLI@2
+    displayName: "Push documentation back to fileshare"
+    inputs:
+      azureSubscription: $(RG_CONN_NAME)
+      scriptType: bash
+      workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)/temp_docs"
+      scriptLocation: inlineScript
+      inlineScript: |
+        echo "Running in $(pwd)..."
+        for dir in $(/usr/bin/find . -maxdepth 1 -type d); do
+          echo "$dir"
+          indexfile="$dir/index.html"
+          if [[ -f "$indexfile" ]]; then
+            echo "Pushing $indexfile"
+            az storage file upload \
+              --account-name aksdsshare \
+              --share-name documentation \
+              --source "$indexfile"
+          fi
+        done;

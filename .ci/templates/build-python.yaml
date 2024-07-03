@@ -1,0 +1,67 @@
+---
+# Build the python package and push to Azure PIP
+
+parameters:
+  - name: PACKAGE_NAME
+    type: string
+    default: ""
+
+steps:
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  - bash: echo "##vso[task.prependpath]$CONDA/bin"
+    displayName: "Add conda to PATH"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+
+  - bash: |
+      python -m pip install --upgrade pip
+      python -m pip install artifacts-keyring keyring build hatchling twine
+      python -m build
+      python -m twine check $(Pipeline.Workspace)/$(Build.Repository.Name)/dist/*.whl
+    displayName: "Build package"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      AZURE_PIPELINE: true
+      # PIP_EXTRA_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+
+  - bash: |
+      # ls ./dist/
+      WHEEL=$(ls ./dist/ | grep .whl)
+      echo "Wheel name: ${WHEEL}"
+      echo "##vso[task.setvariable variable=WHEEL;isOutput=true]${WHEEL}"
+    name: wheelName
+    displayName: "Get wheel file name"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: $(Pipeline.Workspace)/$(Build.Repository.Name)/dist/$(wheelName.WHEEL)
+      artifactName: ${{ parameters.PACKAGE_NAME }}-$(Build.SourceBranchName)
+
+  - task: TwineAuthenticate@1
+    displayName: "Authenticate Twine"
+    inputs:
+      artifactFeed: $(PROJECT_NAME)/$(ARTIFACT_FEED)
+
+  # ref: https://twine.readthedocs.io/en/stable/#twine-upload
+  - bash: |
+      python -m pip install --upgrade pip
+      pip install twine
+      python -m twine upload -r "${ARTIFACT_FEED}" --config-file $(PYPIRC_PATH) --verbose dist/*
+    displayName: "Push package to Azure PyPi"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      ARTIFACT_FEED: $(ARTIFACT_FEED)

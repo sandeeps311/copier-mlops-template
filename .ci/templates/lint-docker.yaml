@@ -1,0 +1,13 @@
+---
+parameters:
+  - name: DOCKERFILE_PATH
+    type: string
+    default: ""
+
+steps:
+  - bash: |
+      echo "Linting dockerfile at ${DOCKERFILE_PATH}"
+      docker run --rm -i -v "$(Build.SourcesDirectory)/.hadolint.yaml":/.config/hadolint.yaml hadolint/hadolint < "${DOCKERFILE_PATH}"
+    displayName: "Lint dockerfile"
+    env:
+      DOCKERFILE_PATH: ${{ parameters.DOCKERFILE_PATH }}

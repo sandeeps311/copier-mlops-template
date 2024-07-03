@@ -1,0 +1,177 @@
+---
+###   ci pipeline for linting and testing (and optionally, building) python projects   ###
+# Add steps that analyze code, save the dist with the build record, publish to a PyPI-compatible index, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/python
+# https://hynek.me/articles/simple-python-azure-pipelines/
+
+### Comment if NOT using as template
+parameters:
+  - name: PACKAGE_NAME
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+  - name: IMPORT_NAME
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+  - name: VERSION_PATH
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+  - name: OLD_NUMPY_VERSION
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+  - name: NEW_NUMPY_LIMIT
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+
+jobs:
+  ### FlowControl
+  - ? ${{ if or(
+        contains(variables['Build.SourceBranch'], 'features/'),
+        eq(variables['Build.SourceBranchName'], 'develop')
+      ) }}
+    : - template: templates/flowcontrol-dev.yaml@dana-dtsc-common # default run test & skip build
+  - ${{ if eq(variables['Build.SourceBranchName'], 'release') }}:
+      - template: templates/flowcontrol-release.yaml@dana-dtsc-common # default run test & build
+  - ${{ if contains(variables['Build.SourceBranch'], 'tags/') }}:
+      - template: templates/flowcontrol-release.yaml@dana-dtsc-common # default run test & build
+
+  - job: Lint
+    workspace:
+      clean: all
+    dependsOn: FlowControl
+    condition: |
+      and(
+        succeeded(),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true')
+      )
+
+    steps:
+      ### checks should pass (unless pre-commit was not run)
+      - template: templates/lint-python.yaml@dana-dtsc-common
+
+  - job: Test
+    workspace:
+      clean: all
+    dependsOn:
+      - FlowControl
+      - Lint
+    condition: >
+      and(
+        in(dependencies.Lint.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+        eq(dependencies.FlowControl.outputs['run_tests.result'], 'true')
+      )
+    pool:
+      vmImage: "ubuntu-latest"
+    strategy:
+      matrix:
+        # python 3.9
+        py39-np_old:
+          python.version: "3.9"
+          numpy_version: ${{ parameters.OLD_NUMPY_VERSION }}
+        py39-np_new:
+          python.version: "3.9"
+          numpy_version: ${{ parameters.NEW_NUMPY_LIMIT }}
+        # python 3.10
+        py310-np_old:
+          python.version: "3.10"
+          numpy_version: ${{ parameters.OLD_NUMPY_VERSION }}
+        py310-np_new:
+          python.version: "3.10"
+          numpy_version: ${{ parameters.NEW_NUMPY_LIMIT }}
+        # python 3.11
+        py311-np_old:
+          python.version: "3.11"
+          numpy_version: ${{ parameters.OLD_NUMPY_VERSION }}
+        py311-np_new:
+          python.version: "3.11"
+          numpy_version: ${{ parameters.NEW_NUMPY_LIMIT }}
+
+    steps:
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: $(python.version)
+        displayName: "Use Python $(python.version)"
+
+      - template: templates/test-python.yaml@dana-dtsc-common
+        parameters:
+          NUMPY_VERSION: $(numpy_version)
+
+  - job: CodeQuality
+    workspace:
+      clean: all
+    dependsOn:
+      - FlowControl
+      - Lint
+      - Test
+    condition: >
+      and(
+        in(dependencies.Lint.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        in(dependencies.Test.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+        eq(dependencies.FlowControl.outputs['run_tests.result'], 'true')
+      )
+
+    steps:
+      ### checks should pass (unless pre-commit was not run)
+      - template: templates/code-quality-python.yaml@dana-dtsc-common
+
+  ### Note: python ci will not validate or build unless release branch
+  ### and will skip if PACKAGE_NAME is None or ""
+  - job: Validate
+    workspace:
+      clean: all
+    dependsOn:
+      - FlowControl
+      - Lint
+      - Test
+      - CodeQuality
+    condition: >
+      and(
+        in(dependencies.Lint.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        in(dependencies.Test.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        in(dependencies.CodeQuality.result, 'Succeeded', 'SucceededWithIssues'),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+        eq(dependencies.FlowControl.outputs['run_build.result'], 'true'),
+        eq(variables['Build.SourceBranchName'], 'release'),
+        notIn(lower('${{ parameters.PACKAGE_NAME }}'), 'none', '')
+      )
+
+    steps:
+      - template: templates/validate-python.yaml@dana-dtsc-common
+        parameters:
+          PACKAGE_NAME: ${{ parameters.PACKAGE_NAME }}
+          VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  ### Note: python ci will not validate or build unless release branch
+  ### and will skip if PACKAGE_NAME is None or ""
+  - job: Build_Publish
+    workspace:
+      clean: all
+    dependsOn:
+      - FlowControl
+      - Test
+      - Validate
+    condition: >
+      and(
+        in(dependencies.Test.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+        in(dependencies.Validate.result, 'Succeeded'),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+        eq(dependencies.FlowControl.outputs['run_build.result'], 'true'),
+        eq(variables['Build.SourceBranchName'], 'release'),
+        notIn(lower('${{ parameters.PACKAGE_NAME }}'), 'none', '')
+      )
+    steps:
+      - template: templates/build-python.yaml@dana-dtsc-common
+        parameters:
+          PACKAGE_NAME: ${{ parameters.PACKAGE_NAME }}
+
+      - template: templates/build-docs.yaml@dana-dtsc-common
+        parameters:
+          PACKAGE_NAME: ${{ parameters.PACKAGE_NAME }}
+          IMPORT_NAME: ${{ parameters.IMPORT_NAME }}
+          VERSION_PATH: ${{ parameters.VERSION_PATH }}

@@ -1,0 +1,174 @@
+---
+trigger:
+  branches:
+    include:
+      - develop
+      - release
+
+pr:
+  branches:
+    include:
+      - develop
+      - release
+    exclude:
+      - '*'
+  paths:
+    include:
+      - "*"
+    exclude:
+      - docs
+      - notebooks
+      - writeup
+      - README.md
+
+resources:
+  repositories:
+    - repository: dana-dtsc-common
+      type: git
+      name: dana-dtsc-common
+      ref: release
+
+name: $(BuildID)
+pool:
+  vmImage: ubuntu-latest
+
+### Variables are static, and used globally for the entire CI
+# yamllint disable
+# prettier-ignore
+variables:
+  - group: dana-int-devops
+  - name: ARTIFACT_FEED
+    value: DataAnalytics
+  - name: PROJECT_ID
+    value: 3f338f18-ddb9-48f0-8e55-31f4a8176d3e
+  - name: PROJECT_STRING
+    value: Data%20and%20Analytics
+  - name: PROJECT_NAME
+    value: Data and Analytics
+  - name: PYTHON_VERSION
+    value: '{{ default_python_version }}'
+  - name: RG_CONN_NAME
+    value: datascience-int-rg-connection
+  - name: SVC_CONN_NAME
+    value: datascience-int-acr-connection
+  - name: PLATFORM
+    value: linux/amd64
+  - name: REGISTRY
+    value: azureregistrypoc.azurecr.io
+# yamllint enable
+
+parameters:
+{%- if is_python_project %}
+  # python
+  - name: PACKAGE_NAME
+    type: string
+    default: {% if is_python_package %}"{{ python_package_name }}"{% else %}""{% endif %}
+    # descr: |
+    #   package name used to publish; we prefix with 'pmi-dtsc-'
+    #   "None" or "" (blank) will skip Validate and Build steps
+  - name: IMPORT_NAME
+    type: string
+    default: "{{ python_import_name }}"
+    # descr: |
+    #   module name used in `import xyz` expressions
+  - name: OLD_NUMPY_VERSION
+    type: string
+    default: "numpy=={{ oldest_supported_numpy }}"
+    # descr: |
+    #   Oldest numpy version to test against
+  - name: NEW_NUMPY_LIMIT
+    type: string
+    default: "numpy<{{ newest_numpy_limit }}"
+    # descr: |
+    #   Newest numpy version to test against
+
+{% endif -%}{%- if is_python_package %}
+  - name: VERSION_PATH
+    type: string
+    default: "$(Build.Repository.LocalPath)/{{ python_version_path }}"
+    # descr: path the VERSION file
+{% endif -%}{%- if (not is_python_package) and is_docker_project %}
+  - name: VERSION_PATH
+    type: string
+    default: "$(Build.Repository.LocalPath)/{{ docker_version_path }}"
+    # descr: path the VERSION file
+{% endif -%}{%- if is_docker_project %}
+  # docker
+  - name: BUILD_CONTEXT
+    type: string
+    default: $(Build.Repository.LocalPath)
+  - name: IMAGES
+    type: object
+    default:
+      # yamllint disable
+      # prettier-ignore
+      - name:         {{ docker_image_name }}
+        jobname:      {{ docker_job_name }}
+        path:         $(Build.Repository.LocalPath)/{{ dockerfile_path }}
+        version_path: $(Build.Repository.LocalPath)/{{ docker_version_path }}
+        source_image: '{{ docker_source | regex_replace('^(.*):(.*)$', '\\1') }}'
+        source_tag:   '{{ docker_source | regex_replace('^(.*):(.*)$', '\\2') }}'
+        ### /!\ WARNING: if 'source_tag' can be converted to float and ends in '0' /!\
+        ### /!\ the trailing '0' will be lost (3.10 --> 3.1)                       /!\
+      # ### example: configuration for images
+      # - name:         <image-name>                  # image name published to registry; prefix with "dtsc"
+      #   jobname:      <job_name>                    # must be Azure Pipelines friendly (aA-zZ, 0-9, underscore only)
+      #   path:         <path/to/dockerfile>          # path from repo root to dockerfile
+      #   version_path: <path/to/version>             # allows each image to have different version
+      #   source_image: '<registry/org/source_image>'   # source image used in "FROM"
+      #   source_tag:   '<image.version.tag>'           # source image tag used in "FROM"
+      # yamllint enable
+{% endif %}
+### Leave alone
+stages:
+{%- if is_python_project %}
+  - stage: Python
+    jobs:
+      - template: .ci/ci-release-python.yaml@dana-dtsc-common
+        parameters:
+          # yamllint disable
+          # prettier-ignore
+          PACKAGE_NAME:      {% raw %}${{ parameters.PACKAGE_NAME }}{% endraw %}
+          IMPORT_NAME:       {% raw %}${{ parameters.IMPORT_NAME }}{% endraw %}
+          VERSION_PATH:      {% raw %}${{ parameters.VERSION_PATH }}{% endraw %}
+          OLD_NUMPY_VERSION: {% raw %}${{ parameters.OLD_NUMPY_VERSION }}{% endraw %}
+          NEW_NUMPY_LIMIT:   {% raw %}${{ parameters.NEW_NUMPY_LIMIT }}{% endraw %}
+          # yamllint enable
+{% endif %}
+{%- if is_docker_project %}
+  - stage: Docker
+    jobs:
+      - template: .ci/ci-release-docker.yaml@dana-dtsc-common
+        parameters:
+          # yamllint disable
+          # prettier-ignore
+          BUILD_CONTEXT: {% raw %}${{ parameters.BUILD_CONTEXT }}{% endraw %}
+          IMAGES:        {% raw %}${{ parameters.IMAGES }}{% endraw %}
+          # yamllint enable
+{% endif -%}{%- if is_python_package or is_docker_project %}
+  - stage: Tag
+    dependsOn:
+      {%- if is_python_project %}
+      - Python
+      {%- endif %}
+      {%- if is_docker_project %}
+      - Docker
+      {%- endif %}
+    condition: |
+      and(
+        {%- if is_python_project %}
+        succeeded('Python'),
+        {%- endif %}
+        {%- if is_docker_project %}
+        succeeded('Docker'),
+        {%- endif %}
+        eq(variables['Build.SourceBranchName'], 'release')
+      )
+    jobs:
+      - template: .ci/ci-release-tag.yaml@dana-dtsc-common
+        parameters:
+          # yamllint disable
+          # prettier-ignore
+          VERSION_PATH: {% raw %}${{ parameters.VERSION_PATH }}{% endraw %}
+          # yamllint enable
+{% endif -%}

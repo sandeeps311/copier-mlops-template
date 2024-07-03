@@ -1,0 +1,101 @@
+---
+###   ci pipeline for building official (versioned) docker image releases   ###
+
+### edit image list as required for build
+parameters:
+  - name: BUILD_CONTEXT
+    type: string
+    default: ""
+  - name: IMAGES
+    type: object
+    default:
+      []
+      # # yamllint disable
+      # # prettier-ignore
+      # - name:         {{ managed with `copier` }}  # image name published to registry; prefix with "dtsc"
+      #   jobname:      {{ managed with `copier` }}  # must be Azure Pipelines friendly (aA-zZ, 0-9, underscore only)
+      #   path:         {{ managed with `copier` }}  # path from repo root to dockerfile
+      #   version_path: {{ managed with `copier` }}  # allows each image to have different version
+      #   source_image: {{ managed with `copier` }}  # specify source image
+      #   source_tag:   {{ managed with `copier` }}  # specify source image tag
+      #   # yamllint enable
+
+jobs:
+  ### FlowControl
+  - ? ${{ if or(
+        contains(variables['Build.SourceBranch'], 'features/'),
+        eq(variables['Build.SourceBranchName'], 'develop')
+      ) }}
+    : - template: templates/flowcontrol-dev.yaml@dana-dtsc-common # default run test & skip build
+  - ${{ if eq(variables['Build.SourceBranchName'], 'release') }}:
+      - template: templates/flowcontrol-release.yaml@dana-dtsc-common # default run test & build
+  - ${{ if contains(variables['Build.SourceBranch'], 'tags/') }}:
+      - template: templates/flowcontrol-release.yaml@dana-dtsc-common # default run test & build
+
+  - job: Lint
+    workspace:
+      clean: all
+    dependsOn: FlowControl
+    condition: |
+      and(
+        succeeded(),
+        eq(dependencies.FlowControl.outputs['run_ci.result'], 'true')
+      )
+    steps:
+      ### checks should pass (unless pre-commit was not run)
+      - ${{ each image in parameters.IMAGES }}:
+          - template: templates/lint-docker.yaml@dana-dtsc-common
+            parameters:
+              DOCKERFILE_PATH: ${{ image.path }}
+
+  - ${{ each image in parameters.IMAGES }}:
+      - job: Validate__${{ image.jobname }}
+        displayName: Validate ${{ image.name }}
+        workspace:
+          clean: all
+        dependsOn:
+          - FlowControl
+          - Lint
+        condition: |
+          and(
+            in(dependencies.Lint.result, 'Succeeded', 'SucceededWithIssues', 'Skipped'),
+            eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+            eq(dependencies.FlowControl.outputs['run_build.result'], 'true')
+          )
+        steps:
+          - template: templates/validate-docker.yaml@dana-dtsc-common
+            parameters:
+              # yamllint disable
+              # prettier-ignore
+              IMAGE_NAME:   ${{ image.name }}
+              VERSION_PATH: ${{ image.version_path }}
+              # yamllint enable
+
+  - ${{ each image in parameters.IMAGES }}:
+      - job: Build_Publish__${{ image.jobname }}
+        displayName: Build and Publish ${{ image.name }}
+        workspace:
+          clean: all
+        dependsOn:
+          - FlowControl
+          - Validate__${{ image.jobname }}
+          # no need to check branch because the build-docker script does this
+          # and tags the image as appropriate
+        condition: |
+          and(
+            in(dependencies.Validate__${{ image.jobname }}.result, 'Succeeded'),
+            eq(dependencies.FlowControl.outputs['run_ci.result'], 'true'),
+            eq(dependencies.FlowControl.outputs['run_build.result'], 'true')
+          )
+        steps:
+          - template: templates/build-docker.yaml@dana-dtsc-common
+            parameters:
+              # yamllint disable
+              # prettier-ignore
+              BUILD_CONTEXT:    ${{ parameters.BUILD_CONTEXT }}
+              IMAGE_NAME:       ${{ image.name }}
+              DOCKERFILE_PATH:  ${{ image.path }}
+              VERSION_PATH:     ${{ image.version_path }}
+              SOURCE_IMAGE:     ${{ image.source_image }}
+              SOURCE_TAG:       ${{ join('', image.source_tag) }} # fix '3.10' --> '3.1' error?
+              # yamllint enable

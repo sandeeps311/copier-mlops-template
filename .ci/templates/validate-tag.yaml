@@ -1,0 +1,71 @@
+---
+# This template gets the currently-published semver versions
+# from git tags and the new semver version file from the repo,
+# then compares the most recent current semver against the new semver
+# to ensure that the new version is strictly greater than the current.
+
+parameters:
+  - name: VERSION_PATH
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+    persistCredentials: true
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  - bash: |
+      NEWVERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      echo "NEWVERSION: ${NEWVERSION}"
+      echo "##vso[task.setvariable variable=NEWVERSION;isOutput=true]${NEWVERSION}"
+    name: get_new_version
+    displayName: "Get (new) version"
+    env:
+      VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - bash: |
+      set -e # exit with fail if any command fails
+      git config user.name "${GIT_USERNAME}"
+      git config user.password "${GIT_PASSWORD}"
+      git config user.email ""
+      git fetch --tags
+      CURRENTTAG="$(git tag -l | grep -E '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?(\+([0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*))?$' | sort -V | tail -n 1)"
+      echo "Version : ${VERSION}"
+      echo "CURRENTTAG : ${CURRENTTAG}"
+      echo "##vso[task.setvariable variable=CURRENTTAG;isOutput=true]${CURRENTTAG}"
+    name: get_current_tag
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    displayName: Get current release tag
+    env:
+      GIT_PASSWORD: $(devops-service-pass)
+      GIT_USERNAME: $(devops-service-user)
+      VERSION: $(get_new_version.NEWVERSION)
+
+  - bash: |
+      python -m pip install semver
+    displayName: Install semver (python)
+  - bash: |
+      chmod +x "$(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py"
+    displayName: Grant python script permission
+
+  - task: PythonScript@0
+    displayName: "Assert new version > current version"
+    inputs:
+      scriptSource: filePath
+      scriptPath: "$(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py"
+      arguments:
+        --current=$(get_current_tag.CURRENTTAG) --new=$(get_new_version.NEWVERSION)

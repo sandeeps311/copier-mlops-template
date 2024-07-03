@@ -1,0 +1,157 @@
+---
+# This template automates the building and tagging of docker images for a specified Dockerfile
+
+parameters:
+  - name: BUILD_CONTEXT
+    type: string
+    default: ""
+  # from image definition object
+  - name: IMAGE_NAME
+    type: string
+    default: ""
+  - name: DOCKERFILE_PATH
+    type: string
+    default: ""
+  - name: VERSION_PATH
+    type: string
+    default: ""
+  - name: SOURCE_IMAGE
+    type: string
+    default: ""
+  - name: SOURCE_TAG
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - bash: env | grep "^__"
+    name: check_template_params
+    displayName: Check template params
+    env:
+      # yamllint disable
+      # prettier-ignore
+      __ARTIFACT_FEED:    $(ARTIFACT_FEED)
+      __PROJECT_ID:       $(PROJECT_ID)
+      __SVC_CONN_NAME:    $(SVC_CONN_NAME)
+      __BUILD_CONTEXT:    ${{ parameters.BUILD_CONTEXT }}
+      __PLATFORM:         $(PLATFORM)
+      __REGISTRY:         $(REGISTRY)
+      __IMAGE_NAME:       ${{ parameters.IMAGE_NAME }}
+      __DOCKERFILE_PATH:  ${{ parameters.DOCKERFILE_PATH }}
+      __VERSION_PATH:     ${{ parameters.VERSION_PATH }}
+      __SOURCE_IMAGE:     ${{ parameters.SOURCE_IMAGE }}
+      __SOURCE_TAG:       ${{ join('', parameters.SOURCE_TAG) }} # fix '3.10' --> '3.1' error?
+      # yamllint enable
+
+  - bash: |
+      SHORT_HASH=${HASH:0:7}
+      COMMIT_TAG="${SHORT_HASH}"
+      echo "##vso[task.setvariable variable=COMMIT_TAG]${COMMIT_TAG}"
+    name: commit_tag
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    displayName: Create commit tag
+    env:
+      BRANCH: $(Build.SourceBranchName)
+      HASH: $(Build.SourceVersion)
+
+  ### version tag
+  # release should use semver from VERSION file
+  # since we don't validate semver for develop or feature branches,
+  # just map them to "develop" and "beta" tags respectively
+  - bash: |
+      echo "SOURCEBRANCH: ${SOURCEBRANCH}"
+      echo "SOURCEBRANCHNAME: ${SOURCEBRANCHNAME}"
+      echo "VERSION_PATH: ${VERSION_PATH}"
+
+      if (grep -q "refs/heads/features/" <<< "${SOURCEBRANCH}"); then
+          VERSION="beta"
+      elif [[ "${SOURCEBRANCH}" = "refs/heads/develop" && "${SOURCEBRANCHNAME}" = "develop" ]]; then
+          VERSION="develop"
+      elif [[ "${SOURCEBRANCH}" = "refs/heads/release" && "${SOURCEBRANCHNAME}" = "release" ]]; then
+          VERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      elif (grep -q "refs/tags/" <<< "${SOURCEBRANCH}"); then
+          VERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      else
+        echo "Error - branch not in ['../features/...', '../develop', '../release']"
+        exit 1
+      fi
+      echo "Setting VERSION_TAG to ${VERSION}"
+      echo "##vso[task.setvariable variable=VERSION_TAG;isOutput=true]${VERSION}"
+
+    name: version_tag
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    displayName: Define version tag
+    env:
+      # yamllint disable
+      # prettier-ignore
+      SOURCEBRANCH:     $(Build.SourceBranch)
+      SOURCEBRANCHNAME: $(Build.SourceBranchName)
+      VERSION_PATH:     ${{ parameters.VERSION_PATH }}
+      # yamllint enable
+
+  - bash: |
+      echo "COMMIT_TAG: ${COMMIT_TAG}"
+      echo "VERSION_TAG: ${VERSION_TAG}"
+    name: check_tags
+    displayName: Check Tags
+    env:
+      COMMIT_TAG: $(commit_tag.COMMIT_TAG)
+      VERSION_TAG: $(version_tag.VERSION_TAG)
+
+  - task: Docker@2
+    displayName: Login to registry
+    inputs:
+      command: login
+      containerRegistry: $(SVC_CONN_NAME)
+
+  - task: PipAuthenticate@1
+    displayName: Pip Authenticate
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+  - bash: |
+      docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+    displayName: Set up QEMU environments for docker buildx
+  - bash: |
+      chmod +x $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/build-docker.sh
+    displayName: Grant shell script permission
+  - bash: $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/build-docker.sh
+    name: build
+    displayName: build
+    env:
+      # yamllint disable
+      # prettier-ignore
+      PLATFORM:             $(PLATFORM)
+      REGISTRY:             $(REGISTRY)
+      BUILD_CONTEXT:        ${{ parameters.BUILD_CONTEXT }}
+      IMAGE_NAME:           ${{ parameters.IMAGE_NAME }}
+      DOCKERFILE_PATH:      ${{ parameters.DOCKERFILE_PATH }}
+      SOURCE_IMAGE:         ${{ parameters.SOURCE_IMAGE }}
+      SOURCE_TAG:           ${{ join('', parameters.SOURCE_TAG) }} # fix '3.10' --> '3.1' error?
+      COMMIT_HASH:          $(Build.SourceVersion)
+      PMI_PIP_INDEX_URL:    $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+      COMMIT_TAG:           $(commit_tag.COMMIT_TAG)
+      VERSION_TAG:          $(version_tag.VERSION_TAG)
+      # yamllint enable
+
+  # # # TODO: multiarch retag (currently only tags the linux/amd64 image that is pulled)
+  # - bash: |
+  #     # pull & inspect image
+  #     docker pull "${REGISTRY}/${IMAGE_NAME}:${COMMIT_TAG}" --quiet
+  #     docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${COMMIT_TAG}"
+
+  #     # Add version tag
+  #     docker tag "${REGISTRY}/${IMAGE_NAME}:${REFERENCE_TAG}" "${REGISTRY}/${IMAGE_NAME}:${VERSION_TAG}"
+  #     docker push "${REGISTRY}/${IMAGE_NAME}:${VERSION_TAG}"
+  #   displayName: Inspect & retag image
+  #   name: inspect
+  #   condition: eq(variables['Build.SourceBranchName'], 'release')
+  #   env:
+  #     REGISTRY: ${{ REGISTRY }}
+  #     IMAGE_NAME: ${{ IMAGE_NAME }}
+  #     COMMIT_TAG: $(commit_tag.COMMIT_TAG)

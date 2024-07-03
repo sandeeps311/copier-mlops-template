@@ -1,0 +1,107 @@
+---
+# This template gets the currently-published semver versions
+# from the python package feed and the new semver version from the repo,
+# then compares the most recent current semver against the new semver
+# to ensure that the new version is strictly greater than the current.
+
+parameters:
+  - name: PACKAGE_NAME
+    type: string
+    default: ""
+  - name: VERSION_PATH
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  ### for local testing, provide -u "USERNAME:PAT"
+  # curl -s "https://feeds.dev.azure.com/pmiorg/${project_id}/_apis/packaging/Feeds/${artifact_feed}/packages?api-version=6.1-preview.1" \
+  #   -u <USERNAME>:<PAT> \
+  #   | jq --arg package_name "${package_name}" '.value[] | select(.name==$package_name) | select(.versions[].isLatest) | .versions[].version' \
+  #   | tr -d '"' | tr -d "'"
+  ### this returns the most recent semver: `0.2.1` or `` if no package found
+  - bash: |
+      # get json output of everything in registry
+      # search for package name and get version
+      # remove quotes
+      URL="https://feeds.dev.azure.com/pmiorg/${PROJECT_ID}/_apis/packaging/Feeds/${ARTIFACT_FEED}/packages?api-version=6.1-preview.1"
+
+      CURRENTVERSION=$( \
+        curl -s "${URL}" -H "Authorization: Bearer ${TOKEN}" \
+        | jq --arg package_name "${PACKAGE_NAME}" '.value[] | select(.name==$package_name) | select(.versions[].isLatest) | .versions[].version' \
+        | tr -d '"' | tr -d "'")
+
+      echo "Current Version: ${CURRENTVERSION}"
+
+      # python package versioning for prerelease packages is not semver-compatible:
+      # ref: https://blog.inedo.com/python/best-practices-for-versioning-python-packages-in-the-enterprise/
+      # Use regular expressions to extract the version and the alpha/beta/rc string
+      if [[ $CURRENTVERSION =~ ^([0-9]+\.[0-9]+\.[0-9]+)([a-z]+)([0-9]+)$ ]]; then
+        SEMVER="${BASH_REMATCH[1]}"
+        PHASE="${BASH_REMATCH[2]}"
+        RELEASE="${BASH_REMATCH[3]}"
+
+        # Replace the alpha/beta/rc character with the corresponding string
+        case "$PHASE" in
+            a) PHASE="-alpha" ;;
+            b) PHASE="-beta" ;;
+            rc) PHASE="-rc" ;;
+            *) ;; # Do nothing if the PHASE character is not recognized
+        esac
+
+        # Combine the version, alpha/beta/rc string, and release number
+        CURRENTVERSION="${SEMVER}${PHASE}${RELEASE}"
+
+        echo "Current Version (fixed): ${CURRENTVERSION}"
+      fi
+
+      echo "##vso[task.setvariable variable=CURRENTVERSION;isOutput=true]${CURRENTVERSION}"
+    name: get_published_version
+    displayName: Get current (published) versions
+    env:
+      # yamllint disable
+      # prettier-ignore
+      ARTIFACT_FEED:  $(ARTIFACT_FEED)
+      PROJECT_ID:     $(PROJECT_ID)
+      TOKEN:          $(System.AccessToken)
+      PACKAGE_NAME:   ${{ parameters.PACKAGE_NAME }}
+      # yamllint enable
+
+  - bash: |
+      NEWVERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      echo "NEWVERSION: ${NEWVERSION}"
+      echo "##vso[task.setvariable variable=NEWVERSION;isOutput=true]${NEWVERSION}"
+    name: get_new_version
+    displayName: "Get (new) version"
+    env:
+      VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - bash: |
+      python -m pip install semver
+    displayName: Install semver (python)
+  - bash: |
+      chmod +x $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py
+    displayName: Grant python script permission
+
+  - task: PythonScript@0
+    displayName: "Assert new version > current version"
+    inputs:
+      scriptSource: filePath
+      scriptPath: $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py
+      arguments: --current=$(get_published_version.CURRENTVERSION) --new=$(get_new_version.NEWVERSION)

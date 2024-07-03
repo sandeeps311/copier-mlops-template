@@ -1,0 +1,32 @@
+---
+# Run linting based .pre-commit-config.yaml configurations
+
+steps:
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  - bash: echo "##vso[task.prependpath]$CONDA/bin"
+    displayName: "Add conda to PATH"
+
+  ### pre-commit configuration in pre-commit-config.yaml(hook stage added) and only take care of ruff and black
+  - bash: |
+      python3 -m pip install --upgrade pip
+      python3 -m pip install pre-commit
+      pre-commit run --all-files --show-diff-on-failure --hook-stage=manual
+    displayName: "Check"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      AZURE_PIPELINE: true
+      # PIP_EXTRA_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task

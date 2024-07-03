@@ -1,0 +1,191 @@
+---
+# --- COPIER CONFIGURATION ---------------------------------------------------
+_min_copier_version: "8"
+_answers_file: .copier-answers.yml
+_envops:
+  autoescape: false
+  keep_trailing_newline: true
+_skip_if_exists:
+  - CHANGELOG.md
+  - CHANGELOG.rst
+  - README.md
+  - VERSION
+_subdirectory: template
+_tasks:
+  - python post_generation.py
+_templates_suffix: .jinja
+
+#  --- PROMPT ----------------------------------------------------------------
+project_name:
+  type: str
+  help: "Project name (e.g., dana-dtsc-...)"
+  default: "dana-dtsc-"
+
+project_description:
+  type: str
+  help: "Project description"
+
+default_python_version:
+  type: str
+  help: "Project: Python version to use [default: 3.10]"
+  choices:
+    "3.9": "3.9"
+    "3.10": "3.10"
+    "3.11": "3.11"
+  default: "3.10" # When using choices, the default must be the choice _value_
+
+# --- Add'l Project Config ---------------------------------------------------
+is_new_project:
+  type: bool
+  help: "Project: Create new project structure (only for new projects)?"
+  default: false
+
+use_precommit:
+  type: bool
+  help: "Project: Install pre-commit?"
+  default: true
+
+# --- Python Options ---------------------------------------------------------
+is_python_project:
+  type: bool
+  help: "Python: Configure as a python project (include python formatting and linting configuration)?"
+  default: true
+
+is_python_package:
+  type: bool
+  help: "Python: Build python package?"
+  default: >-
+    {%- if is_python_project -%}
+      true
+    {%- else -%}
+      false
+    {%- endif -%}
+  when: "{{ is_python_project }}"
+
+python_package_name:
+  type: str
+  help: |
+    Python: Python package name to be published to registry (e.g., "pmi-dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}").
+       NOTE: if pre-existing project, make sure to use the existing package name!
+  default: >-
+    {%- if is_python_package -%}
+    {#- replace everything except the rightmost text following the last '-' -#}
+      pmi-dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_python_package }}"
+
+python_import_name:
+  type: str
+  help: |
+    Python: Python import name (from `src/<import_name>`").
+       NOTE: if folder exists, make sure to use the existing module name!
+  default: ""
+  when: "{{ is_python_project }}"
+
+python_version_path:
+  type: str
+  help: 'Project: Relative file path from repo root to source version file (e.g., "./src/VERSION")'
+  default: >-
+    {%- if is_python_project -%}
+      ./src/VERSION
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_python_project }}"
+
+oldest_supported_numpy:
+  type: str
+  help: |
+    Python: Oldest supported numpy version (e.g., "numpy==`1.23.*`").
+  default: >-
+    {%- if is_python_project -%}
+      1.23.*
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_python_project }}"
+
+newest_numpy_limit:
+  type: str
+  help: |
+    Python: Max boundary for newest supported numpy version (e.g., "numpy<`1.25`").
+  default: >-
+    {%- if is_python_project -%}
+      1.25
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_python_project }}"
+
+use_private_packages:
+  type: bool
+  help: |
+    Python: Include extra-requirements.txt to install PMI packages?
+  default: >-
+    {{ is_python_project }}
+  when: "{{ is_python_project }}"
+
+# --- Docker Options ---------------------------------------------------------
+is_docker_project:
+  type: bool
+  help: "Docker: Configure as a docker project?"
+  default: true
+
+docker_image_name:
+  type: str
+  help: |
+    Docker: Image name to be published to registry. (e.g., "dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}").
+       NOTE: if pre-existing project, make sure to use the existing module name!
+  default: >-
+    {%- if is_docker_project -%}
+      dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_docker_project }}"
+
+docker_job_name:
+  type: str
+  help: 'Docker: Job name for CI/CD (should be Azure Pipelines friendly (no dashes): aA-zZ, 0-9, _)
+    (e.g., "{{ docker_image_name|replace("-", "_") }}")'
+  default: >-
+    {%- if is_docker_project -%}
+      {{ docker_image_name|replace('-', '_') }}
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_docker_project }}"
+
+dockerfile_path:
+  type: str
+  help: 'Docker: Relative file path from repo root to dockerfile (e.g., "./docker/Dockerfile" or "./functions/Dockerfile")'
+  default: >-
+    {%- if is_docker_project -%}
+      ./docker/Dockerfile
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_docker_project }}"
+
+docker_source:
+  type: str
+  help: 'Docker: Source image name (source_image:source_tag) (e.g., "mcr.microsoft.com/azure-functions/python:4-python3.10")'
+  choices:
+    "": ""
+    "mcr.microsoft.com/azure-functions/python:4-python3.9": "mcr.microsoft.com/azure-functions/python:4-python3.9"
+    "mcr.microsoft.com/azure-functions/python:4-python3.10": "mcr.microsoft.com/azure-functions/python:4-python3.10"
+    "mcr.microsoft.com/azure-functions/python:4-python3.11": "mcr.microsoft.com/azure-functions/python:4-python3.11"
+    "python:3.9-slim": "python:3.9-slim"
+    "python:3.10-slim": "python:3.10-slim"
+    "python:3.11-slim": "python:3.11-slim"
+  default: ""
+  when: "{{ is_docker_project }}"
+
+docker_version_path:
+  type: str
+  help: >-
+    Docker: Version file to use for docker image
+    (e.g., "./src/VERSION" or "./docker/VERSION")
+  default: >-
+    {%- if is_docker_project and (python_version_path != '') -%}
+      {{ python_version_path }}
+    {%- elif is_docker_project and ((python_version_path == '') or (python_version_path is None)) -%}
+      {{ dockerfile_path | dirname }}/VERSION
+    {%- else -%}
+    {%- endif -%}
+  when: "{{ is_docker_project }}"

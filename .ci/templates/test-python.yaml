@@ -1,0 +1,93 @@
+---
+# Run unit tests , publish coverage results, and run SonarQube analysis
+parameters:
+  - name: NUMPY_VERSION
+    type: string
+    default: ""
+
+steps:
+  - checkout: self
+    path: $(Build.Repository.Name)
+
+  # handled in ci-release-python
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(python.version)
+
+  # ref: https://docs.microsoft.com/en-us/azure/devops/pipelines/tasks/package/pip-authenticate?view=azure-devops
+  - task: PipAuthenticate@1
+    displayName: "Pip Authenticate"
+    inputs:
+      # Provide list of feed names which you want to authenticate.
+      # Project scoped feeds must include the project name in addition to the feed name.
+      artifactFeeds: $(PROJECT_ID)/$(ARTIFACT_FEED)
+      onlyAddExtraIndex: true
+
+  # - bash: echo "##vso[task.prependpath]$CONDA/bin"
+  #   displayName: "Add conda to PATH"
+
+  - script: echo " print this is $(python.version)"
+    displayName: 'python version'
+
+  # Install requirements and dependencies for tests
+  - bash: |
+      # get kerberos dependencies for testing
+      sudo apt-get install -yq krb5-user
+    displayName: "Install Apt dependencies"
+
+  # Update requirements with specific numpy version
+  - bash: |
+      echo "NUMPY_VERSION: ${{ parameters.NUMPY_VERSION }}"
+
+      # find and replace numpy with NUMPY_VERSION
+      sed -i "s/^numpy.*/${{ parameters.NUMPY_VERSION }}/" ./requirements.txt
+
+      # for testing -- check substitution
+      cat ./requirements.txt
+    displayName: "Update requirements with specific numpy version"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+
+  # Install requirements and dependencies for tests
+  - bash: |
+      # for testing -- ensure requirements.txt file change is preserved
+      cat ./requirements.txt
+
+      python -m pip install --upgrade pip
+
+      python -m pip install -r ./requirements.txt
+      if [[ -f pmi-dtsc-requirements.txt ]]; then
+        python -m pip install --index-url PMI_PIP_INDEX_URL -r ./pmi-dtsc-requirements.txt
+      fi
+
+      python -m pip install \
+        pytest \
+        pytest-asyncio \
+        pytest-azurepipelines \
+        pytest-cov
+    displayName: "Install pip dependencies"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      PMI_PIP_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+
+  # perform unit test and publish testing report to azure
+  # Above installation includes latest numpy version in requirements.txt
+  - script: |
+      python -m pytest \
+        --junitxml="junit__numpy_${{ parameters.NUMPY_VERSION }}.xml" \
+        --test-run-title="python__numpy_latest" \
+        --cov=src \
+        --cov-config=pyproject.toml \
+        --cov-report=term-missing
+    displayName: "Test, Report, and Publish"
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    env:
+      AZURE_PIPELINE: true
+      # PIP_EXTRA_INDEX_URL: $(PIP_EXTRA_INDEX_URL) # from PipAuthenticate task
+
+  - task: PublishCodeCoverageResults@1
+    displayName: "Publish overall coverage report to Azure"
+    inputs:
+      codeCoverageTool: "Cobertura"
+      summaryFileLocation: "$(Pipeline.Workspace)/$(Build.Repository.Name)/coverage.xml"
+      reportDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+      failIfCoverageEmpty: true

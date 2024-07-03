@@ -1,0 +1,134 @@
+import os
+from pathlib import Path
+import shutil
+import subprocess
+
+
+def silence_errors(func):
+    def wrapped(*args, **kwargs):
+        try:
+            func(*args, **kwargs)
+        except Exception:
+            pass
+
+    return wrapped
+
+
+@silence_errors
+def rm(path):
+    os.remove(path)
+
+
+@silence_errors
+def rmdir(path):
+    shutil.rmtree(path)
+
+
+def init_docker_project():
+    _is_docker_project = {{ is_docker_project }}
+    if _is_docker_project:
+        docker_dir = Path("{{ dockerfile_path }}").parent
+        Path(docker_dir).mkdir(parents=True, exist_ok=True)
+
+        # Dockerfile is rendered at repo root; (re)move as required
+        if not Path("{{ dockerfile_path }}").is_file():
+            shutil.move("Dockerfile", docker_dir)
+        else:
+            rm("Dockerfile")
+
+        # Create VERSION file if required
+        if not Path("{{ docker_version_path }}").is_file():
+            with Path("{{ docker_version_path }}").open("w", encoding="utf8") as f:
+                f.write("0.0.1\n")
+
+
+def init_python_project():
+    _is_python_project = {{ is_python_project }}
+    if _is_python_project:
+        folders = [
+            "src/{{ python_import_name }}",
+            "notebooks",
+            "tests",
+        ]
+        [Path(folder).mkdir(parents=True, exist_ok=True) for folder in folders]
+
+        _is_python_package = {{ is_python_package }}
+        if _is_python_package:
+            # Create VERSION file if required
+            if not Path("{{ python_version_path }}").is_file():
+                with Path("{{ python_version_path }}").open("w", encoding="utf8") as f:
+                    f.write("0.0.1\n")
+
+
+def init_new_project():
+    _is_new_project = {{ is_new_project }}
+    if _is_new_project:
+        folders = [
+            "artifacts",
+            "data/raw",
+            "data/processed",
+            "data/raw",
+            "docs",
+            "logs",
+            "notebooks",
+            "src",
+            "tests",
+            "ref",
+            "queries",
+            "writeup",
+        ]
+        [Path(folder).mkdir(parents=True, exist_ok=True) for folder in folders]
+
+
+def init_precommit():
+    _use_precommit = {{ use_precommit }}
+    if _use_precommit:
+        # make sure dir is initialized for git repo
+        check_is_repo = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if check_is_repo.returncode != 0:
+            subprocess.run(["git", "init"])
+
+        # install and init pre-commit
+        pre_commit_install = subprocess.run(["pre-commit", "install"])
+        if pre_commit_install.returncode == 0:
+            subprocess.run(["pre-commit", "autoupdate"])
+
+
+def clean_up_python():
+    _is_python_project = {{ is_python_project }}
+    if not _is_python_project:
+        rm("environment.yaml")
+        rm("environment-dev.yaml")
+        rm("pmi-dtsc-requirements.txt")
+        rm("pyproject.toml")
+        rm("requirements.txt")
+
+    _use_pmi_packages = {{ use_pmi_packages }}
+    if not _use_pmi_packages:
+        rm("pmi-dtsc-requirements.txt")
+
+
+def clean_up_docker():
+    _is_docker_project = {{ is_docker_project }}
+    if not _is_docker_project:
+        rm(".dockerignore")
+        rm(".hadolint.yaml")
+
+
+def delete_myself():
+    rm(__file__)
+
+
+if __name__ == "__main__":
+    init_new_project()
+    init_docker_project()
+    init_python_project()
+    init_precommit()
+    # clean_up_python()
+    # clean_up_docker()
+    delete_myself()
+    print("Project successfully generated!")

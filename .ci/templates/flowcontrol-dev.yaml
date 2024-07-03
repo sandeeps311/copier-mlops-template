@@ -1,0 +1,95 @@
+---
+# This template acts as a traffic director for develop and feature branches.
+# It reads flow-control flags passedin the commit message and
+# passes them on to future pipeline stages to determine whether or not the stage should be run.
+# Develop and Feature branches assume default Testing and Sonar analysis and no build
+# ref: https://github.com/microsoft/azure-pipelines-agent/issues/2944#issuecomment-899667457
+
+jobs:
+  ### This will determine whether to skip full CI pipeline - may be redundant now
+  ### ref: https://github.com/Microsoft/azure-pipelines-agent/issues/1270#issuecomment-475768025
+  - job: FlowControl
+    workspace:
+      clean: all
+    variables:
+      DECODE_PERCENTS: "false"
+
+    steps:
+      - bash: |
+          # get commit message, clean linebreaks, force lowercase
+          git_log=$(git log --max-count=1 --pretty=format:"%B" | \
+            tr "\n" " " | \
+            tr '[:upper:]' '[:lower:]')
+          echo "${git_log}"
+          echo "##vso[task.setvariable variable=COMMIT_MSG]$git_log"
+        name: commit_message
+        displayName: Get commit message
+
+      ### set ci flow controls
+      - bash: |
+          # default true; skip if flag present
+          if ((grep -q "\[skip azp\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[azp skip\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[skip ci\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[ci skip\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[no ci\]" <<< "$COMMIT_MESSAGE")); then
+              RESULT='false'
+          else
+              RESULT='true'
+          fi
+          echo "Setting run_ci to $RESULT"
+          echo "##vso[task.setvariable variable=result;isOutput=true]$RESULT"
+        name: run_ci
+        displayName: Set run_ci result
+        env:
+          COMMIT_MESSAGE: $(COMMIT_MSG)
+
+      ### set test flow controls
+      - bash: |
+          # default true; skip if flag present
+          if ((grep -q "\[no test\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[no tests\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[skip test\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[skip tests\]" <<< "$COMMIT_MESSAGE")); then
+              RESULT='false'
+          else
+              RESULT='true'
+          fi
+          echo "Setting run_tests to $RESULT"
+          echo "##vso[task.setvariable variable=result;isOutput=true]$RESULT"
+        name: run_tests
+        displayName: Set run_tests result
+        env:
+          COMMIT_MESSAGE: $(COMMIT_MSG)
+
+      ### set build flow controls
+      - bash: |
+          if ((grep -q "\[build\]" <<< "$COMMIT_MESSAGE") || \
+              (grep -q "\[release\]" <<< "$COMMIT_MESSAGE")); then
+              RESULT='true'
+          else
+              RESULT='false'
+          fi
+          echo "Setting run_build to $RESULT"
+          echo "##vso[task.setvariable variable=result;isOutput=true]$RESULT"
+        name: run_build
+        displayName: Set run_build result
+        env:
+          COMMIT_MESSAGE: $(COMMIT_MSG)
+
+      - bash: |
+          echo "commit message: ${COMMIT_MESSAGE}"
+          echo "run_ci: ${CI_FLAG}"
+          echo "run_tests: ${TEST_FLAG}"
+          echo "run_build: ${BUILD_FLAG}"
+
+          if [[ "${TEST_FLAG}" = "false" && "${BUILD_FLAG}" = "true" ]]; then
+            echo "WARNING: will skip tests but run build.  This is permitted but not recommended!"
+          fi
+        name: echo_flags
+        displayName: Check outputs
+        env:
+          COMMIT_MESSAGE: $(COMMIT_MSG)
+          CI_FLAG: $(run_ci.result)
+          TEST_FLAG: $(run_tests.result)
+          BUILD_FLAG: $(run_build.result)

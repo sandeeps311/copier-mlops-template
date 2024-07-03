@@ -1,0 +1,37 @@
+---
+
+parameters:
+  - name: VERSION_PATH
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+    persistCredentials: true
+
+
+  - bash: |
+      NEWVERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      echo "NEWVERSION: ${NEWVERSION}"
+      echo "##vso[task.setvariable variable=NEWVERSION;isOutput=true]${NEWVERSION}"
+    name: get_new_version
+    displayName: "Get (new) version"
+    env:
+      VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - bash: |
+            git config user.name "${GIT_USERNAME}"
+            git config user.password "${GIT_PASSWORD}"
+            git config user.email ""
+            git tag -a "${VERSION}" -m "Version ${VERSION} "
+            git push origin "${VERSION}"
+    name: create_git_tag
+    workingDirectory: "$(Pipeline.Workspace)/$(Build.Repository.Name)"
+    displayName: Create release tag
+    env:
+      GIT_PASSWORD: $(devops-service-pass)
+      GIT_USERNAME: $(devops-service-user)
+      VERSION: $(get_new_version.NEWVERSION)

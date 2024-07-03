@@ -1,0 +1,95 @@
+---
+# This template gets permissions to access Azure Container Registry,
+# gets the currently-published semver versions from the registry
+# and the new semver version from the repo,
+# then compares the most recent current semver against the new semver
+# to ensure that the new version is strictly greater than the current.
+parameters:
+  # - name: PYTHON_VERSION
+  #   type: string
+  #   default: ""
+  # - name: RG_CONN_NAME
+  #   type: string
+  #   default: ""
+  # - name: SVC_CONN_NAME
+  #   type: string
+  #   default: ""
+  # - name: REGISTRY
+  #   type: string
+  #   default: ""
+  - name: IMAGE_NAME
+    type: string
+    default: ""
+  - name: VERSION_PATH
+    type: string
+    default: ""
+
+steps:
+  - checkout: dana-dtsc-common
+    path: dana-dtsc-common
+  - checkout: self
+    path: $(Build.Repository.Name)
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: $(PYTHON_VERSION)
+  - task: Docker@2
+    displayName: Login to registry
+    inputs:
+      command: login
+      containerRegistry: $(SVC_CONN_NAME)
+
+  # az acr repository show-tags --top 5 --orderby time_desc \
+  #   --name ${REGISTRY/.azurecr.io/''} \
+  #   --repository ${IMAGE_NAME} \
+  #   | jq 'map(match("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$ "; "gix").string)[0]' \
+  #   | tr -d '"' | tr -d "'"
+  ### this returns the most recent semver: `0.2.1` or `null` if no image found
+  - task: AzureCLI@2
+    name: get_published_version
+    displayName: Get current (published) versions
+    inputs:
+      azureSubscription: $(RG_CONN_NAME)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        # get json output of all tags for specified image
+        # search for valid semver strings
+        # remove quotes
+        CURRENTVERSION=$(az acr repository show-tags --top 5 --orderby time_desc \
+          --name ${REGISTRY/.azurecr.io/''} \
+          --repository ${IMAGE_NAME} \
+          | jq 'map(match("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$ "; "gix").string)[0]' \
+          | tr -d '"' | tr -d "'")
+
+        # if returns `null`, replace with blank ``
+        CURRENTVERSION=${CURRENTVERSION/null/''}
+
+        echo "Current Version: ${CURRENTVERSION}"
+        echo "##vso[task.setvariable variable=CURRENTVERSION;isOutput=true]${CURRENTVERSION}"
+    env:
+      TOKEN: $(System.AccessToken)
+      REGISTRY: $(REGISTRY)
+      IMAGE_NAME: ${{ parameters.IMAGE_NAME }}
+
+  - bash: |
+      NEWVERSION=$(cat "${VERSION_PATH}" | tr -d '"' | tr -d "'")
+      echo "NEWVERSION: ${NEWVERSION}"
+      echo "##vso[task.setvariable variable=NEWVERSION;isOutput=true]${NEWVERSION}"
+    name: get_new_version
+    displayName: "Get (new) version"
+    env:
+      VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - bash: |
+      python -m pip install semver
+    displayName: Install semver (python)
+  - bash: |
+      chmod +x $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py
+    displayName: Grant python script permission
+
+  - task: PythonScript@0
+    displayName: "Assert new version > current version"
+    inputs:
+      scriptSource: filePath
+      scriptPath: $(Pipeline.Workspace)/dana-dtsc-common/.ci/templates/validate-semver.py
+      arguments: --current=$(get_published_version.CURRENTVERSION) --new=$(get_new_version.NEWVERSION)

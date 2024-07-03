@@ -1,0 +1,62 @@
+### Use compatible release functionality
+### (see PEP 440 here: https://www.python.org/dev/peps/pep-0440/#compatible-release)
+### to specify acceptable version ranges of our project dependencies.
+### This gives us the flexibility to keep up with small updates/fixes,
+### & ensures we don't install a major update which could introduce breaking changes.
+
+### see deprecation windows:
+### https://scientific-python.org/specs/spec-0000/#support-window
+
+## Model Building Requirements
+numpy>=1.23,<1.25
+openpyxl
+pandas<2
+pandera
+scikit-learn
+scipy
+tqdm
+xlrd
+cmcrameri
+matplotlib
+seaborn
+
+## for utilities
+azure-identity
+azure-keyvault-secrets
+azure-storage-common
+azure-storage-blob
+azure-storage-file-share
+python-dateutil
+pyodbc
+pyyaml
+redis>=4.5.5 # redis-py on conda
+snowflake-connector-python
+snowflake-sqlalchemy
+sqlalchemy
+
+## mlflow
+azure-storage-blob
+azure-storage-common
+azure-storage-file-share
+mlflow==2.3.2
+
+## testing requirements
+# black
+# black-jupyter
+# coverage
+# numpydoc
+# pytest
+# pytest-asyncio
+# # pytest-azurepipelines
+# pytest-cov
+# ruff
+# sphinx
+# sphinx-rtd-theme
+
+## packaging
+artifacts-keyring
+build
+hatchling
+keyring
+twine
+# wheel

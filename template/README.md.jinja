@@ -1,0 +1,41 @@
+# {{ project_name }}
+
+{{ project_description }}
+
+- [{{ project_name }}](#{{ project_name }})
+  - [Getting Started](#getting-started)
+
+## Getting Started
+
+1. Clone project to local folder
+
+{% if is_python_project -%}
+2. Configure conda environment:
+
+   ```sh
+   # create new environment
+   mamba env create --name {{ python_import_name }} -f ./environment-dev.yaml
+   python -m pip install --no-deps -r requirements.txt
+   python -m pip install --no-deps -r ds_utils-requirements.txt
+   # may require Azure Token when prompted for password
+
+   # or update existing environment
+   conda activate {{ python_import_name }}
+   mamba env update --name {{ python_import_name }} -f ./environment.yaml
+   ```
+
+{% if is_python_project and use_pmi_packages -%}
+3. Install packages from PMI repository:
+
+   ```sh
+   conda activate {{ python_import_name }}
+
+   # may require Azure Token when prompted for password
+   pip install \
+     --no-deps \
+     --index-url=https://pmiorg.pkgs.visualstudio.com/3f338f18-ddb9-48f0-8e55-31f4a8176d3e/_packaging/DataAnalytics/pypi/simple/ \
+     -r pmi-dtsc-requirements.txt
+   ```
+
+{%- endif -%}
+{%- endif -%}

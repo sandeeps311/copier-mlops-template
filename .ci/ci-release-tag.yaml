@@ -1,0 +1,28 @@
+---
+
+parameters:
+
+  - name: VERSION_PATH
+    type: string
+    default: ""
+    # default: {{ managed with `copier` }}
+
+jobs:
+
+  - job: ValidateTag
+    workspace:
+      clean: all
+    steps:
+      - template: templates/validate-tag.yaml@dana-dtsc-common
+        parameters:
+          VERSION_PATH: ${{ parameters.VERSION_PATH }}
+
+  - job: CreateTag
+    dependsOn: ValidateTag
+    condition: succeeded()
+    workspace:
+      clean: all
+    steps:
+      - template: templates/create-tag.yaml@dana-dtsc-common
+        parameters:
+          VERSION_PATH: ${{ parameters.VERSION_PATH }}

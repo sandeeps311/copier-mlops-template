@@ -1,0 +1,34 @@
+---
+# Run SonarQube analysis
+
+steps:
+  - checkout: self
+    path: $(Build.Repository.Name)
+
+  - task: SonarQubePrepare@5
+    inputs:
+      SonarQube: "PMI SonarQube"
+      scannerMode: CLI
+      configMode: manual
+      cliProjectKey: "$(Build.Repository.Name)"
+      cliProjectName: "$(Build.Repository.Name)"
+      extraProperties: |
+        # Additional properties that will be passed to the scanner,
+        # Put one key=value per line, example:
+        # sonar.exclusions=**/*.bin
+        sonar.branch.name=$(Build.SourceBranchName)
+        sonar.exclusions=**/notebooks/**
+        sonar.python.coverage.reportPaths=**/coverage.xml
+        sonar.python.coveragePlugin=cobertura
+
+  - task: SonarQubeAnalyze@5
+    displayName: "Run Code Analysis"
+    enabled: true
+
+  - task: SonarQubePublish@5
+    displayName: "Publish Quality Gate Result"
+    enabled: true
+
+  - task: sonar-buildbreaker@8
+    inputs:
+      SonarQube: "PMI SonarQube"
