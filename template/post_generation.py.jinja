@@ -107,9 +107,9 @@ def clean_up_python():
         rm("pyproject.toml")
         rm("requirements.txt")
 
-    _use_pmi_packages = {{ use_pmi_packages }}
-    if not _use_pmi_packages:
-        rm("pmi-dtsc-requirements.txt")
+    _use_private_packages: = {{ use_private_packages: }}
+    if not _use_private_packages::
+        rm("extra-requirements.txt")
 
 
 def clean_up_docker():
