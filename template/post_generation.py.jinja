@@ -93,9 +93,9 @@ def init_precommit():
             subprocess.run(["git", "init"])
 
         # install and init pre-commit
-        pre_commit_install = subprocess.run(["pre-commit", "install"])
+        pre_commit_install = subprocess.run(["uv run pre-commit", "install"])
         if pre_commit_install.returncode == 0:
-            subprocess.run(["pre-commit", "autoupdate"])
+            subprocess.run(["uv run pre-commit", "autoupdate"])
 
 
 def clean_up_python():
