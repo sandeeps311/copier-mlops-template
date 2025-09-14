@@ -11,8 +11,8 @@ _skip_if_exists:
   - README.md
   - VERSION
 _subdirectory: template
-_tasks:
-  - python post_generation.py
+# _tasks:
+#   - python post_generation.py
 _templates_suffix: .jinja
 
 #  --- PROMPT ----------------------------------------------------------------
