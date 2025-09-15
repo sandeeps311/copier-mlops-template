@@ -18,8 +18,8 @@ _templates_suffix: .jinja
 #  --- PROMPT ----------------------------------------------------------------
 project_name:
   type: str
-  help: "Project name (e.g., dana-dtsc-...)"
-  default: "dana-dtsc-"
+  help: "Project name (e.g. my_project)"
+  default: "my_project"
 
 project_description:
   type: str
@@ -65,12 +65,12 @@ is_python_package:
 python_package_name:
   type: str
   help: |
-    Python: Python package name to be published to registry (e.g., "pmi-dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}").
+    Python: Python package name to be published to registry (e.g., "mlops-{{ project_name | regex_replace('.*(?<=-)', '') }}").
        NOTE: if pre-existing project, make sure to use the existing package name!
   default: >-
     {%- if is_python_package -%}
     {#- replace everything except the rightmost text following the last '-' -#}
-      pmi-dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}
+      mlops-{{ project_name | regex_replace('.*(?<=-)', '') }}
     {%- else -%}
     {%- endif -%}
   when: "{{ is_python_package }}"
@@ -132,11 +132,11 @@ is_docker_project:
 docker_image_name:
   type: str
   help: |
-    Docker: Image name to be published to registry. (e.g., "dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}").
+    Docker: Image name to be published to registry. (e.g., "mlops-{{ project_name | regex_replace('.*(?<=-)', '') }}").
        NOTE: if pre-existing project, make sure to use the existing module name!
   default: >-
     {%- if is_docker_project -%}
-      dtsc-{{ project_name | regex_replace('.*(?<=-)', '') }}
+      mlops-{{ project_name | regex_replace('.*(?<=-)', '') }}
     {%- else -%}
     {%- endif -%}
   when: "{{ is_docker_project }}"
